@@ -1,0 +1,99 @@
+.create-post {
+  display: flex;
+  gap: 12px;
+  padding: 16px;
+  border-bottom: 1px solid #2f3336;
+}
+
+.post-avatar img {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+}
+
+.post-body {
+  flex: 1;
+}
+
+.post-body textarea {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  font-size: 18px;
+  color: white;
+  min-height: 80px;
+}
+
+.post-body textarea::placeholder {
+  color: #71767b;
+}
+
+.post-image-preview {
+  margin-top: 12px;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.post-image-preview img {
+  width: 100%;
+  max-height: 300px;
+  object-fit: cover;
+}
+
+.post-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.image-upload {
+  cursor: pointer;
+  font-size: 20px;
+  color: #1d9bf0;
+}
+
+.post-actions button {
+  background-color: #1d9bf0;
+  border: none;
+  color: white;
+  padding: 8px 18px;
+  border-radius: 999px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.post-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 📱 Mobile */
+@media (max-width: 600px) {
+  .create-post {
+    padding: 12px;
+  }
+
+  .post-body textarea {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 600px) {
+  .post-actions button {
+    padding: 6px 14px;
+    font-size: 14px;
+  }
+  
+  .post-avatar img {
+    width: 40px;
+    height: 40px;
+  }
+
+  .post-body textarea {
+    min-height: 60px;
+  }
+}
+

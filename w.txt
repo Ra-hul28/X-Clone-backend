@@ -1,0 +1,3220 @@
+I have a full stack MERN project . This is the path : PS C:\Users\Test\Desktop\X Clone>..In that X Clone , I have backend , frontend ,node_modules, .env, package-lock.json and package.json.Into the backend ,I have controllers, db, middleware, models, routes, utils and server.js..Into the controllers, I have auth.controller.js, notification.controller.js, post.controller.js and user.controller.js..Into the db, I have connectDB.js..Into the middleware, I have protectRoute.js..Into the models, I have notification.model.js, post.model.js and user.model.js..Into the routes, I have auth.route.js, notificationRoute.js, post.route.js and user.route.js..Into the utils, I have generateToken.js.. 
+Into the frontend, I have node_modules, public, src, .gitignore, eslint.config.js, index.html, package-lock.json, package.json, README.md, and vite.config.js..Into the src, I have the folders named api, assets, components, context, pages, App.css, App.jsx, index.css and main.jsx..Into the api, I have axios.js..Into the components, I have AppLayout.jsx, AppLayout.css, CreatePost.jsx, CreatePost.css, EditProfileModal.jsx, EditProfileModal.css, Feed.jsx, Feed.css, FollowListModal.jsx, FollowListModal.css, PostCard.jsx, PostCard.css, ProtectedRoute.jsx, Sidebar.jsx, Sidebar.css, SuggestedUsers.jsx and SuggestedUsers.css..Into the context, I have AuthContext.jsx..Into the pages, I have Home.jsx, Home.css, Login.css, Login.jsx, Notifications.jsx, Notifications.css, Profile.css, Profile.jsx, Signup.jsx and Signup.css..
+
+Backend codes :
+
+auth.controller.js :
+import User from "../models/user.model.js"
+import bcrypt from "bcryptjs";
+import generateToken from "../utils/generateToken.js";
+
+export const signup = async(req,res)=>{
+    try {
+      const {username, fullName, email, password} = req.body;
+
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if(!emailRegex.test(email)){
+        return res.status(400).json({error : "Invalid email Format"})
+      }
+
+      const existingEmail = await User.findOne({email})
+      const existingUsername = await User.findOne({username})
+
+      if(existingEmail || existingUsername){
+        return res.status(400).json({error : "Already Existing User or email"})
+      }
+
+      if(password.length < 6){
+        return res.status(400).json({error : "Password must have atleast 6 char length"})
+      }
+      
+      //hashing the password
+      const  salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(password, salt);
+
+      const newUser = new User({
+        username,
+        fullName,
+        email,
+        password : hashedPassword 
+      })
+
+      if(newUser){
+        generateToken(newUser._id , res)
+        await newUser.save();
+        res.status(200).json({
+            _id : newUser._id,
+            username : newUser.username,
+            fullName : newUser.fullName,
+            email : newUser.email,
+            followers : newUser.followers,
+            following : newUser.following,
+            profileImg : newUser.profileImg,
+            coverImg : newUser.coverImg,
+            bio : newUser.bio,
+            link : newUser.link
+        })
+      }
+      else{
+        res.status(400).json({error : "Invalid User Data"})
+      }
+    } 
+    catch (error) {
+       console.log(`Error in signup controller : ${error}`)
+       res.status(500).json({error : "Internal server error"}) 
+    }
+}
+
+export const login = async (req,res)=>{
+    try {
+        const {username, password} = req.body;
+        const user = await User.findOne({username});
+        const isPasswordCorrect = await bcrypt.compare(password , user?.password || "");
+
+        if(!user || !isPasswordCorrect){
+            return res.status(400).json({error : "Invalid username or password"})
+        }
+
+        generateToken(user._id , res);
+
+        res.status(200).json({
+            _id : user._id,
+            username : user.username,
+            fullName : user.fullName,
+            email : user.email,
+            followers : user.followers,
+            following : user.following,
+            profileImg : user.profileImg,
+            coverImg : user.coverImg,
+            bio : user.bio,
+            link : user.link
+
+        })
+
+    } catch (error) {
+        console.log(`Error in login Controller : ${error}`)
+        res.status(500).json({error : "Internal Server Error"})
+    }   
+}
+
+export const logout = async (req,res)=>{
+    try {
+        res.cookie("jwt", "", {maxAge : 0});
+        res.status(200).json({message : "Logout successfully"});
+
+    } catch (error) {
+        console.log(`Error in logout Controller : ${error}`)
+        res.status(500).json({error : "Internal Server Error"})
+    }
+}
+
+export const getMe = async(req, res)=>{
+    try {
+        const user = await User.findOne({_id : req.user._id}).select("-password")
+        res.status(200).json(user);
+    } catch (error) {
+        console.log(`Error in getMe controller : ${error}`)
+        res.status(500).json({error : "Internal Server Error"});
+    }
+}
+
+notification.controller.js :
+import Notification from "../models/notification.model.js";
+
+export const getNotifications = async(req,res)=>{
+    try {
+        const userId = req.user._id;
+        const notification = await Notification.find({to : userId})
+              .populate({
+                path : "from",
+                select : "username profileImg"
+              })
+        await Notification.updateMany({to:userId}, {read:true})
+
+        res.status(200).json(notification);
+    } catch (error) {
+        console.log(`Error in getNotifications controller : ${error}`)
+        res.status(500).json({error : `Internal Server error`})
+    }
+}
+
+export const deleteNotifications = async(req,res)=>{
+    try {
+        const userId = req.user._id;
+
+        await Notification.deleteMany({to:userId});
+
+        res.status(200).json({message : "Notification deleted Successfully"})
+    } catch (error) {
+        console.log(`Error in deleteNotifications controller : ${error}`)
+        res.status(500).json({error : `Internal Server error`})
+    }
+}
+
+post.controller.js :
+import User from "../models/user.model.js"
+import cloudinary from 'cloudinary'
+import Post from "../models/post.model.js";
+import Notification from "../models/notification.model.js";
+
+export const createPost = async (req, res) => {
+    try {
+        const { text } = req.body;
+        let { img } = req.body;
+        const userId = req.user._id.toString();
+
+        const user = await User.findById(userId);
+        if (!user) return res.status(404).json({ error: "User not found" });
+
+        if (!text && !img) {
+            return res.status(400).json({ error: "Post must have text or image" });
+        }
+
+        if (img) {
+            // Updated: Added basic check and explicit upload call
+            const uploadedResponse = await cloudinary.uploader.upload(img, {
+                resource_type: "auto", 
+            });
+            img = uploadedResponse.secure_url;
+        }
+
+        const newPost = new Post({
+            user: userId,
+            text,
+            img,
+        });
+
+        await newPost.save();
+        res.status(201).json(newPost);
+    } catch (error) {
+        console.error("Error in createPost controller:", error);
+        res.status(500).json({ error: error.message || "Internal server Error" });
+    }
+};
+
+export const deletePost = async(req,res)=>{
+    try {
+        const {id} = req.params;
+
+        const post = await Post.findOne({_id : id});
+        if(!post){
+            return res.status(400).json({error : "Post not found"})
+        }
+
+        if(post.user.toString() !== req.user._id.toString()){
+            return res.status(401).json({error : "You are not authorized to delete this post"})
+        }
+
+        if(post.img){
+            const imgId = post.img.split("/").pop().split(".")[0];
+            await cloudinary.uploader.destroy(imgId);
+        }
+
+        await Post.findByIdAndDelete({_id : id});
+        res.status(200).json({message : "Post deleted Successfully"});
+
+    } catch (error) {
+        console.log(`Error in deleting post controller : ${error}`)
+        res.status(500).json({error : "Internal Server Error"})
+    }
+}
+
+export const createComment = async (req, res) => {
+  try {
+    const { text } = req.body;
+    const postId = req.params.id;
+    const userId = req.user._id;
+
+    if (!text) {
+      return res.status(400).json({ error: "Comment text is required" });
+    }
+
+    const post = await Post.findOne({ _id: postId });
+    if (!post) {
+      return res.status(404).json({ error: "Post not found" });
+    }
+
+    const comment = {
+      user: userId,
+      text
+    };
+
+    post.comments.push(comment);
+    await post.save();
+
+    // UPDATE: Populate the user details for the comments before sending back
+    const updatedPost = await Post.findById(postId).populate({
+      path: "comments.user",
+      select: "-password -email -following -followers -bio -link",
+    });
+
+    res.status(200).json(updatedPost);
+  } catch (error) {
+    console.log(`Error in comment controller : ${error}`);
+    res.status(500).json({ error: "Internal Server error" });
+  }
+};
+
+export const likeUnlikePost = async (req,res)=>{
+    try {
+        const userId = req.user._id;
+        const {id : postId} = req.params;
+
+        const post = await Post.findOne({ _id: postId });
+        if(!post){
+            return res.status(404).json({error : "Post not found"})
+        }
+        const userLikedPost = post.likes.includes(userId);
+        if(userLikedPost){
+            //unlike post
+            await Post.updateOne({_id :postId}, {$pull : {likes : userId}})
+            await User.updateOne({_id : userId}, {$pull : {likedPosts : postId}})
+            res.status(200).json({message : "Post unliked Successfully"})
+        }
+        else{
+            //like post
+            post.likes.push(userId);
+            await User.updateOne({_id : userId} , {$push : {likedPosts : postId}})
+            await post.save();
+
+            const notification = new Notification({
+                from : userId,
+                to : post.user,
+                type : "like"
+            })
+            await notification.save();
+            res.status(200).json({message : "Post liked successfully"})
+        }
+    } catch (error) {
+        console.log(`Error in like and unlike controller : ${error}`)
+        res.status(500).json({error : "Internal Server error"})
+    }
+}
+
+export const getAllPosts = async(req,res)=>{
+    try {
+        const posts = await Post.find().sort({createdAt : -1}).populate({
+            path : "user",
+            select : "-password"
+        })
+        .populate({
+            path : "comments.user",
+            select : ["-password" , "-email" , "-following" , "-followers" , "-bio" , "-link"]
+        })
+        if(!posts.length === 0){
+            return res.status(200).json([])
+        }
+        res.status(200).json(posts)
+    } catch (error) {
+        console.log(`Error in getAllPosts controller : ${error}`)
+        res.status(500).json({error : "Internal server error"})
+    }
+}
+
+export const getLikedPosts = async(req,res)=>{
+    try {
+        const userId = req.params.id;
+        const user = await User.findById({_id : userId})
+        if(!user){
+            return res.status(404).json({error : "User not found"})
+        }
+        const likedPosts = await Post.find({_id : {$in : user.likedPosts}})
+            .populate({
+                path : 'user',
+                select : "-password"
+            })
+            .populate({
+                path : "comments.user",
+                select : ["-password" , "-email" , "-following" , "-followers" , "-bio" , "-link"]
+            })
+        res.status(200).json(likedPosts)
+    } catch (error) {
+        console.log(`Error in getLikedPosts controller : ${error}`)
+        res.status(500).json({error : "Internal server error"})
+    }
+}
+
+export const getFollowingPosts = async(req,res)=>{
+    try {
+        const userId = req.user._id;
+        const user = await User.findById({_id : userId})
+        if(!user){
+            return res.status(404).json({error : "user not found"})
+        }
+        const following = user.following;
+        
+        const feedPosts = await Post.find({user : {$in : following}})
+                           .sort({createdAt : -1})
+                           .populate({
+                            path : "comments.user",
+                            select : "-password"
+                           })
+        res.status(200).json(feedPosts);
+    } catch (error) {
+        console.log(`Error in getFollowingPosts controller : ${error}`)
+        res.status(500).json({error : "Internal Server error"})
+    }
+}
+
+export const getUserPosts = async(req,res)=>{
+    try {
+        const {username} = req.params;
+        const user = await User.findOne({username})
+        if(!user){
+            return res.status(404).json({error : "User not found"})
+        }
+        const posts = await Post.find({user : user._id})
+                      .sort({createdAt : -1})
+                      .populate({
+                        path : "user",
+                        select : "-password"
+                      })
+                      .populate({
+                        path : "comments.user",
+                        select : "-password"
+                      })
+        res.status(200).json(posts);
+    } catch (error) {
+        console.log(`Error in getUserPosts controller : ${error}`)
+        res.status(500).json({error : "Internal Server error"})
+    }
+}
+
+user.controller.js :
+import User from "../models/user.model.js";
+import Notification from "../models/notification.model.js";
+import bcrypt from "bcryptjs";
+import { v2 as cloudinary } from "cloudinary";
+
+export const getProfile = async (req, res) => {
+    try {
+        const { username } = req.params;
+        // Populate allows the frontend to see the actual user objects in the arrays
+        const user = await User.findOne({ username })
+            .select("-password")
+            .populate({
+                path: "followers",
+                select: "username fullName profileImg bio",
+            })
+            .populate({
+                path: "following",
+                select: "username fullName profileImg bio",
+            });
+
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        res.status(200).json(user);
+    } catch (error) {
+        console.log(`Error in get User profile controller : ${error}`);
+        res.status(500).json({ error: "Internal server error" });
+    }
+};
+
+// REPLACE your followUnFollowUser function with this:
+export const followUnFollowUser = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const userToModify = await User.findById(id);
+        const currentUser = await User.findById(req.user._id);
+
+        if (id === req.user._id.toString()) {
+            return res.status(400).json({ error: "You cannot follow yourself" });
+        }
+
+        if (!userToModify || !currentUser) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        const isFollowing = currentUser.following.includes(id);
+
+        if (isFollowing) {
+            // Unfollow
+            await User.findByIdAndUpdate(id, { $pull: { followers: req.user._id } });
+            await User.findByIdAndUpdate(req.user._id, { $pull: { following: id } });
+        } else {
+            // Follow
+            await User.findByIdAndUpdate(id, { $push: { followers: req.user._id } });
+            await User.findByIdAndUpdate(req.user._id, { $push: { following: id } });
+
+            const newNotification = new Notification({
+                type: "follow",
+                from: req.user._id,
+                to: id,
+            });
+            await newNotification.save();
+        }
+
+        // FETCH THE UPDATED AUTH USER TO RETURN TO FRONTEND
+        const updatedAuthUser = await User.findById(req.user._id).select("-password");
+        
+        // Return the user object directly or as part of the response
+        res.status(200).json(updatedAuthUser);
+        
+    } catch (error) {
+        console.log(`Error in followUnFollow controller: ${error}`);
+        res.status(500).json({ error: error.message });
+    }
+};
+
+export const getSuggestedUsers = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const userFollowedByMe = await User.findById(userId).select("following");
+
+        const users = await User.aggregate([
+            { $match: { _id: { $ne: userId } } },
+            { $sample: { size: 10 } },
+        ]);
+
+        const filteredUser = users.filter((user) => !userFollowedByMe.following.includes(user._id));
+        const suggestedUsers = filteredUser.slice(0, 4);
+
+        suggestedUsers.forEach((user) => (user.password = null));
+        res.status(200).json(suggestedUsers);
+    } catch (error) {
+        console.log(`Error in getSuggestedUsers controller : ${error}`);
+        res.status(500).json({ error: "Internal server error" });
+    }
+};
+
+export const updateUser = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const { username, fullName, email, currentPassword, newPassword, bio, link } = req.body;
+        let { profileImg, coverImg } = req.body;
+
+        let user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        if ((!newPassword && currentPassword) || (!currentPassword && newPassword)) {
+            return res.status(400).json({ error: "Please provide both the new password and current password" });
+        }
+
+        if (currentPassword && newPassword) {
+            const isMatch = await bcrypt.compare(currentPassword, user.password);
+            if (!isMatch) {
+                return res.status(400).json({ error: "Current Password is incorrect" });
+            }
+            if (newPassword.length < 6) {
+                return res.status(400).json({ error: "Password must have at least 6 characters" });
+            }
+            const salt = await bcrypt.genSalt(10);
+            user.password = await bcrypt.hash(newPassword, salt);
+        }
+
+        if (profileImg) {
+            if (user.profileImg) {
+                await cloudinary.uploader.destroy(user.profileImg.split("/").pop().split(".")[0]);
+            }
+            const uploadedResponse = await cloudinary.uploader.upload(profileImg);
+            profileImg = uploadedResponse.secure_url;
+        }
+
+        if (coverImg) {
+            if (user.coverImg) {
+                await cloudinary.uploader.destroy(user.coverImg.split("/").pop().split(".")[0]);
+            }
+            const uploadedResponse = await cloudinary.uploader.upload(coverImg);
+            coverImg = uploadedResponse.secure_url;
+        }
+
+        user.fullName = fullName || user.fullName;
+        user.email = email || user.email;
+        user.username = username || user.username;
+        user.bio = bio || user.bio;
+        user.link = link || user.link;
+        user.profileImg = profileImg || user.profileImg;
+        user.coverImg = coverImg || user.coverImg;
+
+        user = await user.save();
+        user.password = null;
+        return res.status(200).json(user);
+    } catch (error) {
+        console.log(`Error in updateUser controller : ${error}`);
+        res.status(500).json({ error: "Internal server error" });
+    }
+};
+
+connectDB.js :
+import mongoose from "mongoose";
+
+const connectDB = async()=>{
+    try{
+       await mongoose.connect(process.env.MONGO_URL)
+       console.log("MongoDB Connected")
+    }
+    catch(error){
+        console.log(`Error in connecting Db : ${error}`)
+        process.exit(1)
+    }
+}
+
+export default connectDB
+
+protectRoute.js :
+import jwt from "jsonwebtoken";
+import User from "../models/user.model.js";
+
+const protectRoute = async (req,res,next)=>{
+    try {
+       const token = req.cookies.jwt;
+       if(!token){
+        return res.status(400).json({error : "Unauthorized : No token Provided"})
+       } 
+
+       const decoded = jwt.verify(token , process.env.JWT_SECRET)
+
+       if(!decoded){
+        return res.status(400).json({error : "Unauthorized : Invalid Token"})
+       }
+
+       const user = await  User.findOne({_id : decoded.userId}).select("-password");
+
+       if(!user){
+        return res.status(400).json({error : "User not found"})
+       }
+       req.user = user;
+       next();
+    } catch (error) {
+       console.log(`Error in protectRoute middleware : ${error}`)
+       res.status(500).json({error : "Internal Server Error"})   
+    }
+}
+
+export default protectRoute;
+
+notification.model.js :
+import mongoose from "mongoose";
+
+
+const notificationSchema = mongoose.Schema({
+   from:{
+      type : mongoose.Schema.Types.ObjectId,
+      ref : "User",
+      required : true
+   },
+   to:{
+      type : mongoose.Schema.Types.ObjectId,
+      ref : "User",
+      required : true
+   },
+   type:{
+      type : String,
+      required : true,
+      enum : ["follow", "like"]
+   },
+   read:{
+      type : Boolean,
+      default : false
+   }
+},{timestamps:true})
+
+const Notification = mongoose.model("Notification", notificationSchema)
+export default Notification;
+
+post.model.js :
+import mongoose from "mongoose";
+
+const postSchema = mongoose.Schema ({
+    user : {
+        type : mongoose.Schema.Types.ObjectId,
+        ref : "User",
+        required : true
+    },
+    text : {
+        type : String
+    },
+    img : {
+        type : String
+    },
+    likes : [
+        {
+            type : mongoose.Schema.Types.ObjectId,
+            ref : "User"
+        }
+    ],
+    comments : [
+        {
+            text :{
+                type : String,
+                required : true
+            },
+            user : {
+                type : mongoose.Schema.Types.ObjectId,
+                ref : "User",
+                required : true
+            }
+        }
+    ]
+}, {timestamps : true})
+
+const Post = mongoose.model("Posts" , postSchema)
+export default Post;
+
+user.model.js :
+import mongoose from "mongoose";
+
+const UserSchema = mongoose.Schema({
+    username : {
+        type : String,
+        required : true,
+        unique : true
+    },
+    fullName : {
+        type : String,
+        required : true
+    },
+    email : {
+        type : String,
+        required : true,
+        unique : true
+    },
+    password : {
+        type : String,
+        required : true,
+        minLength : 6
+    },
+    followers : [
+        {
+        type : mongoose.Schema.Types.ObjectId,
+        ref : "User",
+        default : []
+        }
+    ],
+    following : [
+        {
+        type : mongoose.Schema.Types.ObjectId,
+        ref : "User",
+        default : []
+        }
+    ],
+    profileImg : {
+        type : String,
+        default : ""
+    },
+    coverImg : {
+        type : String,
+        default : ""
+    },
+    bio : {
+        type : String,
+        default : ""
+    },
+    link : {
+        type : String,
+        default : ""
+    },
+    likedPosts : [
+        {
+         type : mongoose.Schema.Types.ObjectId,
+         ref : "Post",
+         default : []
+        }
+    ]
+}, {timestamps : true})
+
+const User = mongoose.model("User", UserSchema);
+export default User;
+
+auth.route.js :
+import express from 'express'
+
+import {signup, login, logout, getMe} from "../controllers/auth.controller.js"
+
+import protectRoute from '../middleware/protectRoute.js';
+
+const  router = express.Router();
+
+router.post("/signup" , signup)
+router.post("/login" , login)
+router.post("/logout" , logout)
+router.get("/me", protectRoute, getMe)
+export default router;
+
+notificationRoute.js :
+import express from 'express'
+import protectRoute from '../middleware/protectRoute.js';
+import { getNotifications , deleteNotifications } from '../controllers/notification.controller.js';
+
+const router = express.Router();
+
+router.get("/" , protectRoute , getNotifications)
+router.delete("/" , protectRoute , deleteNotifications)
+
+export default router;
+
+post.route.js :
+import express from 'express'
+import protectRoute from '../middleware/protectRoute.js';
+import { createPost , deletePost  , createComment , likeUnlikePost , getAllPosts , getLikedPosts , getFollowingPosts , getUserPosts} from '../controllers/post.controller.js';
+
+const router = express.Router();
+
+router.get("/all" , protectRoute , getAllPosts)
+router.get("/following" , protectRoute , getFollowingPosts)
+router.get("/likes/:id" , protectRoute , getLikedPosts)
+router.get("/user/:username" , protectRoute , getUserPosts)
+router.post("/create" , protectRoute , createPost)
+router.post("/like/:id" , protectRoute , likeUnlikePost)
+router.post("/comment/:id" , protectRoute , createComment)
+router.delete("/:id" , protectRoute , deletePost)
+
+export default router;
+
+user.route.js :
+import express from "express";
+import protectRoute from "../middleware/protectRoute.js";
+import { 
+    getProfile, 
+    followUnFollowUser, 
+    getSuggestedUsers, 
+    updateUser 
+} from "../controllers/user.controller.js";
+
+const router = express.Router();
+
+router.get("/profile/:username", protectRoute, getProfile);
+router.post("/follow/:id", protectRoute, followUnFollowUser);
+router.get("/suggested", protectRoute, getSuggestedUsers);
+router.post("/update", protectRoute, updateUser);
+
+export default router;
+
+generateToken.js :
+import jwt from "jsonwebtoken"
+
+const generateToken = (userId, res)=>{
+    const token = jwt.sign({userId} , process.env.JWT_SECRET,{
+        expiresIn : "15d"
+    });
+
+    res.cookie("jwt" , token , {
+        maxAge : 15*24*60*1000,
+        httpOnly : true , //to prevent xss attacks
+        sameSite : "strict", //to prevent CSRF attacks
+        secure : process.env.NODE_ENV !== "development"
+    })
+}
+
+export default generateToken;
+
+server.js :
+import express from 'express';
+import dotenv from 'dotenv';
+import cookieParser from 'cookie-parser';
+import cloudinary from "cloudinary";
+import cors from "cors"; // 1. Import CORS
+import authRoute from "./routes/auth.route.js";
+import userRoute from "./routes/user.route.js";
+import connectDB from './db/connectDB.js';
+import postRoute from './routes/post.route.js';
+import notificationRoute from "./routes/notificationRoute.js";
+
+const app = express();
+dotenv.config();
+
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET_KEY
+});
+
+// 2. CONFIGURE CORS (Must be before routes)
+app.use(cors({
+    origin: "http://localhost:5175", // Your frontend URL
+    credentials: true,               // Allows cookies/headers
+}));
+
+const PORT = process.env.PORT || 5000;
+
+app.use(express.json({ limit: "10mb" })); 
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+app.use(cookieParser());
+
+app.use("/api/auth", authRoute);
+app.use("/api/users", userRoute);
+app.use("/api/posts", postRoute);
+app.use("/api/notifications", notificationRoute);
+
+app.listen(PORT, () => {
+    console.log(`Server is Running on ${PORT}`);
+    connectDB();
+});
+
+.env :
+PORT = 5000
+MONGO_URL = mongodb+srv://rahul282004:Fullstack-X-Clone@cluster0.u2urtrp.mongodb.net/twitter-clone?appName=Cluster0
+JWT_SECRET = huwf9wnf2929842b2rh2f248
+NODE_ENV = development
+CLOUDINARY_API_KEY = 239532735513923
+CLOUDINARY_API_SECRET_KEY = tvbGENXBBQhoEmuPQijk7wrGU_8
+CLOUDINARY_CLOUD_NAME = dw97hmnrs
+
+
+Frontend Codes :
+
+axios.js :
+import axios from "axios";
+
+const api = axios.create({
+  baseURL: "http://localhost:5000/api",
+  withCredentials: true, // VERY important if using cookies
+});
+
+export default api;
+
+AppLayout.jsx :
+import Sidebar from "./Sidebar";
+import "./AppLayout.css";
+
+const AppLayout = ({ children }) => {
+  return (
+    <div className="app-layout">
+      <Sidebar />
+      <main className="main-content">
+        {children}
+      </main>
+    </div>
+  );
+};
+export default AppLayout;
+
+AppLayout.css :
+.app-layout {
+  display: flex;
+  max-width: 1300px;
+  margin: 0 auto;
+  min-height: 100vh;
+}
+
+.main-content {
+  flex: 1;
+  border-left: 1px solid #2f3336;
+  border-right: 1px solid #2f3336;
+  background-color: #000;
+  box-shadow: 0 0 40px rgba(29, 155, 240, 0.05);
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+  .app-layout {
+    flex-direction: column;
+  }
+
+  .main-content {
+    border: none;
+    padding-bottom: 60px; /* space for bottom nav */
+  }
+}
+
+CreatePost.jsx :
+import { useState } from "react";
+import api from "../api/axios";
+import "./CreatePost.css";
+
+const CreatePost = ({ onPostCreated }) => {
+  const [text, setText] = useState("");
+  const [img, setImg] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => setImg(reader.result);
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!text.trim() && !img) return;
+
+    try {
+      setLoading(true);
+      // Sending JSON to match backend post.controller.js
+      const res = await api.post("/posts/create", { text, img });
+      
+      onPostCreated(res.data);
+      setText("");
+      setImg(null);
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.error || "Post failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="create-post">
+      <div className="post-avatar">
+        <img src="https://abs.twimg.com/sticky/default_profile_images/default_profile_400x400.png" alt="avatar" />
+      </div>
+      <div className="post-body">
+        <textarea
+          placeholder="What is happening?!"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
+        {img && (
+          <div className="post-image-preview">
+            <img src={img} alt="preview" />
+            <button className="remove-img" onClick={() => setImg(null)}>X</button>
+          </div>
+        )}
+        <div className="post-actions">
+          <label className="image-upload">
+            📷 <input type="file" accept="image/*" hidden onChange={handleImageChange} />
+          </label>
+          <button onClick={handleSubmit} disabled={loading || (!text.trim() && !img)}>
+            {loading ? "Posting..." : "Post"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default CreatePost;
+
+CreatePost.css :
+.create-post {
+  display: flex;
+  gap: 12px;
+  padding: 16px;
+  border-bottom: 1px solid #2f3336;
+}
+
+.post-avatar img {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+}
+
+.post-body {
+  flex: 1;
+}
+
+.post-body textarea {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  font-size: 18px;
+  color: white;
+  min-height: 80px;
+}
+
+.post-body textarea::placeholder {
+  color: #71767b;
+}
+
+.post-image-preview {
+  margin-top: 12px;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.post-image-preview img {
+  width: 100%;
+  max-height: 300px;
+  object-fit: cover;
+}
+
+.post-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.image-upload {
+  cursor: pointer;
+  font-size: 20px;
+  color: #1d9bf0;
+}
+
+.post-actions button {
+  background-color: #1d9bf0;
+  border: none;
+  color: white;
+  padding: 8px 18px;
+  border-radius: 999px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.post-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 📱 Mobile */
+@media (max-width: 600px) {
+  .create-post {
+    padding: 12px;
+  }
+
+  .post-body textarea {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 600px) {
+  .post-actions button {
+    padding: 6px 14px;
+    font-size: 14px;
+  }
+}
+
+EditProfileModal.jsx :
+import { useState } from "react";
+import api from "../api/axios";
+import "./EditProfileModal.css";
+
+const EditProfileModal = ({ user, onClose, onUpdate }) => {
+  const [formData, setFormData] = useState({
+    fullName: user.fullName || "",
+    username: user.username || "",
+    email: user.email || "",
+    bio: user.bio || "",
+    link: user.link || "",
+    newPassword: "",
+    currentPassword: "",
+  });
+
+  const [profileImg, setProfileImg] = useState(null);
+  const [coverImg, setCoverImg] = useState(null);
+
+  const handleInputChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleImageChange = (e, setImg) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => setImg(reader.result);
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await api.post("/users/update", {
+        ...formData,
+        profileImg,
+        coverImg,
+      });
+      onUpdate(res.data);
+      onClose();
+    } catch (err) {
+      alert(err.response?.data?.error || "Update failed");
+    }
+  };
+
+  return (
+    <div className="modal-overlay">
+      <div className="edit-modal">
+        <form onSubmit={handleSubmit}>
+          <div className="modal-header">
+            <button type="button" onClick={onClose}>✕</button>
+            <h3>Edit Profile</h3>
+            <button type="submit" className="save-btn">Save</button>
+          </div>
+
+          <div className="edit-images">
+            <div className="edit-cover">
+              <img src={coverImg || user.coverImg || ""} alt="cover" />
+              <input type="file" accept="image/*" onChange={(e) => handleImageChange(e, setCoverImg)} />
+            </div>
+            <div className="edit-avatar">
+              <img src={profileImg || user.profileImg || "https://abs.twimg.com/sticky/default_profile_images/default_profile_400x400.png"} alt="avatar" />
+              <input type="file" accept="image/*" onChange={(e) => handleImageChange(e, setProfileImg)} />
+            </div>
+          </div>
+
+          <div className="edit-inputs">
+            <input name="fullName" placeholder="Name" value={formData.fullName} onChange={handleInputChange} />
+            <textarea name="bio" placeholder="Bio" value={formData.bio} onChange={handleInputChange} />
+            <input name="link" placeholder="Location/Link" value={formData.link} onChange={handleInputChange} />
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+export default EditProfileModal;
+
+EditProfileModal.css :
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(91, 112, 131, 0.4);
+  display: flex; justify-content: center; align-items: center;
+  z-index: 1000;
+}
+
+.edit-modal {
+  background: black;
+  width: 100%; max-width: 600px;
+  border-radius: 16px;
+  overflow-y: auto; max-height: 90vh;
+}
+
+.modal-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 15px; position: sticky; top: 0; background: black;
+}
+
+.save-btn {
+  background: white; color: black; border-radius: 20px;
+  padding: 5px 15px; font-weight: bold; border: none;
+}
+
+.edit-cover {
+  height: 150px; background: #333; position: relative;
+}
+
+.edit-cover img { width: 100%; height: 100%; object-fit: cover; opacity: 0.6; }
+
+.edit-avatar {
+  width: 100px; height: 100px; border-radius: 50%;
+  border: 4px solid black; margin-top: -50px; margin-left: 20px;
+  position: relative; background: #000;
+}
+
+.edit-avatar img { width: 100%; height: 100%; border-radius: 50%; opacity: 0.6; }
+
+.edit-inputs { display: flex; flex-direction: column; gap: 15px; padding: 20px; }
+
+.edit-inputs input, .edit-inputs textarea {
+  background: transparent; border: 1px solid #333;
+  padding: 12px; color: white; border-radius: 4px;
+}
+
+Feed.jsx :
+import CreatePost from "./CreatePost";
+import PostCard from "./PostCard";
+import "./Feed.css";
+
+const Feed = () => {
+  return (
+    <div className="feed">
+      <div className="feed-tabs">
+        <button className="active">For you</button>
+        <button>Following</button>
+      </div>
+
+      <CreatePost />
+
+      <PostCard />
+      <PostCard />
+      <PostCard />
+    </div>
+  );
+};
+
+export default Feed;
+
+Feed.css :
+.feed-tabs {
+  display: flex;
+  border-bottom: 1px solid #2f3336;
+}
+
+.feed-tabs button {
+  flex: 1;
+  padding: 14px;
+  background: none;
+  color: #71767b;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.feed-tabs .active {
+  color: #e7e9ea;
+  border-bottom: 3px solid #1d9bf0;
+}
+
+FollowListModal.jsx :
+import { Link } from "react-router-dom";
+import api from "../api/axios";
+import { useAuth } from "../context/AuthContext";
+import "./FollowListModal.css";
+
+const FollowListModal = ({ title, users, onClose, onUpdateProfile }) => {
+  const { user: authUser, setUser: setAuthUser } = useAuth();
+
+  const handleUnfollow = async (e, userId) => {
+    e.preventDefault(); // Stop the Link navigation
+    e.stopPropagation(); // Stop event bubbling
+    try {
+      const res = await api.post(`/users/follow/${userId}`);
+      
+      // Update global auth user to keep the session alive and update global state
+      setAuthUser(res.data);
+      
+      // Call the refresh function passed from Profile.jsx to update the counts in the background
+      if (onUpdateProfile) {
+        onUpdateProfile();
+      }
+    } catch (err) {
+      console.error("Failed to unfollow:", err);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="follow-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3>{title}</h3>
+          <button className="close-btn" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-list">
+          {users.length === 0 && <p className="no-data">No users found.</p>}
+          {users.map((user) => {
+            const isFollowing = authUser?.following?.includes(user._id);
+            const isMe = authUser?._id === user._id;
+
+            return (
+              <div key={user._id} className="user-list-row">
+                <Link to={`/profile/${user.username}`} className="user-list-item" onClick={onClose}>
+                  <img src={user.profileImg || "https://abs.twimg.com/sticky/default_profile_images/default_profile_400x400.png"} alt="avatar" />
+                  <div className="user-list-info">
+                    <p className="full-name">{user.fullName}</p>
+                    <p className="username">@{user.username}</p>
+                  </div>
+                </Link>
+                
+                {!isMe && isFollowing && title === "Following" && (
+                  <button 
+                    className="modal-unfollow-btn" 
+                    onClick={(e) => handleUnfollow(e, user._id)}
+                  >
+                    Unfollow
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default FollowListModal;
+
+FollowListModal.css :
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(91, 112, 131, 0.4);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 2000;
+}
+
+.follow-modal {
+  background: black;
+  width: 100%;
+  max-width: 400px;
+  height: 60vh;
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px;
+  border-bottom: 1px solid #2f3336;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: bold;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 5px;
+}
+
+.modal-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 0;
+}
+
+.user-list-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-right: 15px;
+  transition: 0.2s;
+}
+
+.user-list-row:hover {
+  background-color: #080808;
+}
+
+.user-list-item {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 15px;
+  text-decoration: none;
+}
+
+.user-list-item img {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.user-list-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.user-list-info .full-name {
+  color: white;
+  font-weight: bold;
+  font-size: 15px;
+  margin: 0;
+}
+
+.user-list-info .username {
+  color: #71767b;
+  font-size: 14px;
+  margin: 0;
+}
+
+.modal-unfollow-btn {
+  background: white;
+  color: black;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-weight: bold;
+  font-size: 13px;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.modal-unfollow-btn:hover {
+  background: #e6e6e6;
+}
+
+.no-data {
+  text-align: center;
+  color: #71767b;
+  padding: 20px;
+}
+
+.modal-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.modal-list::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 10px;
+}
+
+PostCard.jsx :
+import { useAuth } from "../context/AuthContext";
+import api from "../api/axios";
+import { Link } from "react-router-dom";
+import { useState } from "react";
+import "./PostCard.css";
+
+const PostCard = ({ post, onPostDeleted }) => {
+  const { user: authUser } = useAuth();
+
+  const [likes, setLikes] = useState(post.likes || []);
+  const [comments, setComments] = useState(post.comments || []);
+  const [isCommenting, setIsCommenting] = useState(false);
+  const [commentText, setCommentText] = useState("");
+  const [isLiking, setIsLiking] = useState(false);
+
+  const isLiked = likes.includes(authUser?._id);
+  const isMyPost = authUser?._id === post.user?._id;
+
+  const handleLike = async () => {
+    if (isLiking) return;
+    try {
+      setIsLiking(true);
+      await api.post(`/posts/like/${post._id}`);
+      if (isLiked) {
+        setLikes(likes.filter((id) => id !== authUser._id));
+      } else {
+        setLikes([...likes, authUser._id]);
+      }
+    } catch (err) {
+      console.error("Error liking post", err);
+    } finally {
+      setIsLiking(false);
+    }
+  };
+
+  const handleComment = async (e) => {
+    e.preventDefault();
+    if (!commentText.trim()) return;
+
+    try {
+      const res = await api.post(`/posts/comment/${post._id}`, { text: commentText });
+      setComments(res.data.comments); 
+      setCommentText("");
+      setIsCommenting(false);
+    } catch (err) {
+      console.error("Error adding comment", err);
+      alert("Failed to post comment");
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!window.confirm("Are you sure you want to delete this post?")) return;
+    try {
+      await api.delete(`/posts/${post._id}`);
+      if (onPostDeleted) onPostDeleted(post._id);
+    } catch (err) {
+      console.error("Error deleting post", err);
+      alert("Failed to delete post");
+    }
+  };
+
+  // --- NEW: COPY LINK FUNCTION (No backend needed) ---
+  const handleCopyLink = () => {
+    const postUrl = `${window.location.origin}/profile/${post.user?.username}`; // Or a specific post route if you have one
+    navigator.clipboard.writeText(postUrl);
+    alert("Profile link copied to clipboard!");
+  };
+
+  return (
+    <div className="post-card">
+      <Link to={`/profile/${post.user?.username}`} className="post-avatar">
+        <img
+          src={post.user?.profileImg || "https://abs.twimg.com/sticky/default_profile_images/default_profile_400x400.png"}
+          alt="avatar"
+        />
+      </Link>
+
+      <div className="post-content">
+        <div className="post-header">
+          <Link to={`/profile/${post.user?.username}`} className="post-name">
+            {post.user?.fullName}
+          </Link>
+          <span className="post-username">@{post.user?.username}</span>
+          <span className="post-dot">·</span>
+          <span className="post-time">
+            {new Date(post.createdAt).toLocaleDateString()}
+          </span>
+        </div>
+
+        <p className="post-text">{post.text}</p>
+
+        {post.img && (
+          <div className="post-image">
+            <img src={post.img} alt="post" />
+          </div>
+        )}
+
+        {/* UPDATED ACTION BUTTONS */}
+        <div className="post-actions">
+          {/* 1. COMMENT */}
+          <div className="action-item" onClick={() => setIsCommenting(!isCommenting)}>
+            <span>💬</span> {comments.length}
+          </div>
+
+          {/* 2. DELETE (Only if it's your post, replaces Repost) */}
+          <div className={`action-item ${isMyPost ? "delete-active" : "disabled"}`} onClick={isMyPost ? handleDelete : null}>
+             <span title={isMyPost ? "Delete" : "Only authors can delete"}>{isMyPost ? "🗑️" : "🔒"}</span>
+          </div>
+
+          {/* 3. LIKE */}
+          <div className={`action-item ${isLiked ? "liked" : ""}`} onClick={handleLike}>
+            <span>{isLiked ? "❤️" : "🖤"}</span> {likes.length}
+          </div>
+
+          {/* 4. SHARE (Replaces Analytics) */}
+          <div className="action-item" onClick={handleCopyLink}>
+            <span title="Copy Link">🔗</span>
+          </div>
+        </div>
+
+        {/* COMMENT INPUT SECTION */}
+        {isCommenting && (
+          <div className="comment-input-wrapper">
+            <form onSubmit={handleComment} className="comment-form">
+              <input
+                type="text"
+                placeholder="Post your reply"
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+                autoFocus
+              />
+              <button type="submit" className="reply-btn" disabled={!commentText.trim()}>
+                Reply
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* COMMENTS DISPLAY SECTION */}
+        {comments.length > 0 && (
+          <div className="comments-display-section">
+            {comments.slice(0, 3).map((comment, index) => ( // Showing only top 3
+              <div key={index} className="comment-item">
+                <img 
+                  src={comment.user?.profileImg || "https://abs.twimg.com/sticky/default_profile_images/default_profile_400x400.png"} 
+                  className="comment-avatar" 
+                  alt="user" 
+                />
+                <div className="comment-item-content">
+                  <div className="comment-user-info">
+                    {comment.user?.fullName} 
+                    <span className="comment-username">@{comment.user?.username}</span>
+                  </div>
+                  <p className="comment-text">{comment.text}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default PostCard; 
+
+PostCard.css :
+.post-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.delete-icon {
+  margin-left: auto;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: 0.2s;
+}
+
+.delete-icon:hover {
+  color: #f4212e;
+  opacity: 1;
+}
+
+.post-actions {
+  display: flex;
+  justify-content: space-between;
+  max-width: 425px;
+  margin-top: 12px;
+  color: #71767b;
+}
+
+.action-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: 0.2s;
+}
+
+.action-item:hover {
+  color: #1d9bf0;
+}
+
+.action-item.liked {
+  color: #f4212e;
+}
+
+/* Comment Section Wrapper */
+.comment-input-wrapper {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #2f3336;
+}
+
+.comment-form {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.comment-form input {
+  flex: 1;
+  background-color: transparent;
+  border: none;
+  color: white;
+  font-size: 15px;
+  outline: none;
+}
+
+.reply-btn {
+  background-color: #1d9bf0;
+  color: white;
+  border: none;
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.reply-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.reply-btn:hover:not(:disabled) {
+  background-color: #1a8cd8;
+}
+
+/* Displaying existing comments */
+.comments-display-section {
+  margin-top: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.comment-item {
+  display: flex;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.comment-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+}
+
+.comment-item-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.comment-user-info {
+  font-weight: bold;
+  color: white;
+}
+
+.comment-username {
+  color: #71767b;
+  font-weight: normal;
+  margin-left: 5px;
+}
+
+.comment-text {
+  color: #e7e9ea;
+  margin-top: 2px;
+}
+
+/* Styling for the list of comments below the post */
+.comments-display-section {
+  margin-top: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-top: 1px solid #2f3336;
+  padding-top: 12px;
+}
+
+.comment-item {
+  display: flex;
+  gap: 10px;
+  padding: 5px 0;
+}
+
+.comment-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.comment-item-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.comment-user-info {
+  font-size: 14px;
+  font-weight: bold;
+  color: white;
+}
+
+.comment-username {
+  color: #71767b;
+  font-weight: normal;
+  margin-left: 4px;
+}
+
+.comment-text {
+  font-size: 14px;
+  color: #e7e9ea;
+  margin-top: 2px;
+}
+
+.comment-input-wrapper {
+  margin-top: 10px;
+  padding: 10px 0;
+}
+
+.action-item.delete-active:hover {
+    color: #ef4444; /* Red color on hover */
+}
+.action-item.disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+@media (max-width: 600px) {
+  .post-actions {
+    max-width: 100%;
+    justify-content: space-between;
+  }
+
+  .post-text {
+    font-size: 15px;
+  }
+
+  .post-image img {
+    max-height: 250px;
+    object-fit: cover;
+  }
+}
+
+ProtectedRoute.jsx :
+import { Navigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+
+const ProtectedRoute = ({ children }) => {
+  const { user, loading } = useAuth();
+
+  if (loading) return null;
+
+  if (!user) return <Navigate to="/login" />;
+
+  return children;
+};
+
+export default ProtectedRoute;
+
+Sidebar.jsx :
+import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+import api from "../api/axios";
+import "./Sidebar.css";
+
+const Sidebar = () => {
+  const { user, setUser } = useAuth();
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    try {
+      await api.post("/auth/logout");
+      setUser(null);
+      navigate("/login");
+    } catch (err) {
+      console.error("Logout failed", err);
+    }
+  };
+
+  return (
+    <aside className="sidebar">
+      <div className="sidebar-top">
+        <div className="logo-container" onClick={() => navigate("/")}>
+          <span className="logo-x">𝕏</span>
+        </div>
+
+        <nav className="menu">
+          <Link to="/" className="menu-item active">
+            <span className="icon">🏠</span> <span className="label">Home</span>
+          </Link>
+          <Link to="/notifications" className="menu-item">
+            <span className="icon">🔔</span> <span className="label">Notifications</span>
+          </Link>
+          <Link to={`/profile/${user?.username}`} className="menu-item">
+            <span className="icon">👤</span> <span className="label">Profile</span>
+          </Link>
+        </nav>
+
+        <button className="post-btn-large">Post</button>
+      </div>
+
+      {user && (
+        <div className="user-profile-toggle" onClick={handleLogout}>
+          <div className="user-info-mini">
+            <img 
+              src={user.profileImg || "https://abs.twimg.com/sticky/default_profile_images/default_profile_400x400.png"} 
+              alt="avatar" 
+            />
+            <div className="user-details">
+              <p className="full-name">{user.fullName}</p>
+              <p className="username">@{user.username}</p>
+            </div>
+          </div>
+          <span className="logout-icon">⏻</span>
+        </div>
+      )}
+    </aside>
+  );
+};
+
+export default Sidebar;
+
+Sidebar.css :
+.sidebar {
+  width: 275px;
+  padding: 10px 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+}
+
+.logo-x {
+  font-size: 32px;
+  padding: 12px;
+  display: inline-block;
+  cursor: pointer;
+}
+
+.menu {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 12px;
+  border-radius: 30px;
+  text-decoration: none;
+  color: #e7e9ea;
+  font-size: 20px;
+  transition: 0.2s;
+}
+
+.menu-item:hover {
+  background-color: #181818;
+}
+
+.menu-item.active {
+  font-weight: bold;
+}
+
+.post-btn-large {
+  background-color: #1d9bf0;
+  color: white;
+  border: none;
+  border-radius: 30px;
+  padding: 15px;
+  font-weight: bold;
+  font-size: 17px;
+  margin-top: 20px;
+  width: 90%;
+  cursor: pointer;
+}
+
+.user-profile-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  border-radius: 999px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.user-profile-toggle:hover {
+  background-color: #181818;
+}
+
+.user-info-mini {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.user-info-mini img {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+}
+
+.full-name {
+  font-weight: bold;
+  font-size: 15px;
+  color: white;
+}
+
+.username {
+  color: #71767b;
+  font-size: 15px;
+}
+
+/* Tablet Responsive */
+@media (max-width: 1280px) {
+  .sidebar { width: 80px; align-items: center; padding: 10px 0; }
+  .label, .user-details, .post-btn-large { display: none; }
+  .menu-item { justify-content: center; width: 50px; height: 50px; }
+}
+
+/* 📱 Mobile Bottom Nav */
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 60px;
+    width: 100%;
+    flex-direction: row;
+    justify-content: space-around;
+    align-items: center;
+    padding: 0;
+    background: black;
+    border-top: 1px solid #2f3336;
+    z-index: 100;
+  }
+
+  .sidebar-top {
+    flex-direction: row;
+    width: 100%;
+    justify-content: space-around;
+  }
+
+  .logo-container,
+  .post-btn-large,
+  .user-profile-toggle {
+    display: none;
+  }
+
+  .menu {
+    flex-direction: row;
+    width: 100%;
+    justify-content: space-around;
+  }
+
+  .menu-item {
+    padding: 0;
+    font-size: 22px;
+  }
+}
+
+SuggestedUsers.jsx :
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import api from "../api/axios";
+import { useAuth } from "../context/AuthContext";
+import "./SuggestedUsers.css";
+
+const SuggestedUsers = () => {
+  const [suggestedUsers, setSuggestedUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const { user: authUser, setUser: setAuthUser } = useAuth();
+
+  useEffect(() => {
+    const getSuggested = async () => {
+      try {
+        const res = await api.get("/users/suggested");
+        setSuggestedUsers(res.data);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    getSuggested();
+  }, []);
+
+  const handleFollow = async (userId) => {
+  try {
+    const res = await api.post(`/users/follow/${userId}`);
+    
+    // res.data is now the full updated user object from the backend
+    setAuthUser(res.data);
+    
+    // Remove the user from suggestions UI
+    setSuggestedUsers(prev => prev.filter(u => u._id !== userId));
+  } catch (err) {
+    console.error("Follow failed", err);
+  }
+};
+
+  if (loading) return null;
+
+  return (
+    <div className="suggested-container">
+      <h3>Who to follow</h3>
+      {suggestedUsers.map((user) => (
+        <div key={user._id} className="suggested-item">
+          <Link to={`/profile/${user.username}`} className="suggested-info">
+            <img src={user.profileImg || "https://abs.twimg.com/sticky/default_profile_images/default_profile_400x400.png"} alt="avatar" />
+            <div className="suggested-names">
+              <span className="full-name">{user.fullName}</span>
+              <span className="username">@{user.username}</span>
+            </div>
+          </Link>
+          <button className="follow-btn-sm" onClick={() => handleFollow(user._id)}>Follow</button>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+export default SuggestedUsers;
+
+SuggestedUsers.css :
+.suggested-container {
+  background-color: #16181c;
+  border-radius: 16px;
+  padding: 15px;
+  margin-top: 10px;
+  width: 350px;
+}
+
+.suggested-container h3 { margin-bottom: 15px; font-size: 20px; }
+
+.suggested-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.suggested-info { display: flex; gap: 10px; text-decoration: none; color: white; }
+
+.suggested-info img { width: 40px; height: 40px; border-radius: 50%; }
+
+.suggested-names { display: flex; flex-direction: column; font-size: 14px; }
+
+.username { color: #71767b; }
+
+.follow-btn-sm {
+  background: white;
+  color: black;
+  border: none;
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+@media (max-width: 1024px) {
+  .suggested-container {
+    display: none;
+  }
+}
+
+AuthContext.jsx :
+import { createContext, useContext, useEffect, useState } from "react";
+import api from "../api/axios";
+
+const AuthContext = createContext();
+
+export const AuthProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchMe = async () => {
+      try {
+        // Call the real backend to check if we have a valid JWT cookie
+        const res = await api.get("/auth/me");
+        setUser(res.data);
+      } catch (err) {
+        // If 401 or error, user is not logged in
+        setUser(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchMe();
+  }, []);
+
+  return (
+    <AuthContext.Provider value={{ user, setUser, loading }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+export const useAuth = () => useContext(AuthContext);
+
+Home.jsx :
+import { useEffect, useState } from "react";
+import api from "../api/axios";
+import CreatePost from "../components/CreatePost";
+import PostCard from "../components/PostCard";
+import "./Home.css"; // Ensure you create this for tab styling
+
+const Home = () => {
+  const [posts, setPosts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [feedType, setFeedType] = useState("forYou");
+
+  useEffect(() => {
+    const fetchPosts = async () => {
+      try {
+        setLoading(true);
+        const endpoint = feedType === "forYou" ? "/posts/all" : "/posts/following";
+        const res = await api.get(endpoint);
+        setPosts(res.data);
+      } catch (err) {
+        console.error(err);
+        setPosts([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchPosts();
+  }, [feedType]);
+
+  const handlePostCreated = (newPost) => {
+    setPosts([newPost, ...posts]);
+  };
+
+  const handlePostDeleted = (postId) => {
+    setPosts(posts.filter(p => p._id !== postId));
+  };
+
+  return (
+    <div className="home">
+      {/* Feed Tabs */}
+      <div className="home-tabs">
+        <div 
+          className={`tab ${feedType === "forYou" ? "active" : ""}`} 
+          onClick={() => setFeedType("forYou")}
+        >
+          For you
+        </div>
+        <div 
+          className={`tab ${feedType === "following" ? "active" : ""}`} 
+          onClick={() => setFeedType("following")}
+        >
+          Following
+        </div>
+      </div>
+
+      <CreatePost onPostCreated={handlePostCreated} />
+
+      {loading ? (
+        <p style={{ padding: "20px" }}>Loading...</p>
+      ) : (
+        <div className="feed">
+          {posts.map((post) => (
+            <PostCard 
+              key={post._id} 
+              post={post} 
+              onPostDeleted={handlePostDeleted} 
+            />
+          ))}
+          {posts.length === 0 && (
+            <p style={{ textAlign: "center", padding: "40px", color: "#71767b" }}>
+              No posts to show. Start following people!
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default Home;
+
+Home.css :
+.home-tabs {
+  display: flex;
+  border-bottom: 1px solid #2f3336;
+  position: sticky;
+  top: 0;
+  background: rgba(0,0,0,0.8);
+  backdrop-filter: blur(5px);
+  z-index: 10;
+}
+
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: 15px;
+  cursor: pointer;
+  color: #71767b;
+  font-weight: bold;
+  transition: 0.2s;
+}
+
+.tab:hover {
+  background: #181818;
+}
+
+.tab.active {
+  color: white;
+  position: relative;
+}
+
+.tab.active::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 60px;
+  height: 4px;
+  background-color: #1d9bf0;
+  border-radius: 2px;
+}
+
+Login.jsx :
+import { useState } from "react";
+import api from "../api/axios";
+import "./Login.css";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+
+const Login = () => {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+
+  const navigate = useNavigate();
+  const { setUser } = useAuth();
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setError("");
+
+    try {
+      const res = await api.post("/auth/login", { username, password });
+      setUser(res.data);
+      navigate("/");
+    } catch (err) {
+      setError(err.response?.data?.message || "Login failed");
+    }
+  };
+
+  return (
+    <div className="login-container">
+      <div className="login-left">
+        <span className="big-x-logo">𝕏</span>
+      </div>
+      
+      <div className="login-right">
+        <div className="login-box">
+          <h1 className="lets-go">Let's go.</h1>
+          
+          <form onSubmit={handleLogin}>
+            <div className="input-group">
+              <span className="input-icon">👤</span>
+              <input
+                type="text"
+                placeholder="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="input-group">
+              <span className="input-icon">⌨️</span>
+              <input
+                type={showPassword ? "text" : "password"}
+                placeholder="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+              <span 
+                className="toggle-password" 
+                onClick={() => setShowPassword(!showPassword)}
+              >
+                {showPassword ? "👁️" : "👁️‍🗨️"}
+              </span>
+            </div>
+
+            {error && <p className="auth-error">{error}</p>}
+
+            <button className="login-btn" type="submit">Login</button>
+          </form>
+
+          <div className="login-footer">
+            <p>Don't have an account?</p>
+            <button className="signup-link-btn" onClick={() => navigate("/signup")}>
+              Sign up
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default Login;
+
+Login.css :
+.login-container {
+  display: flex;
+  min-height: 100vh;
+  background-color: #000;
+  color: white;
+}
+
+.login-left {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 300px;
+}
+
+.login-right {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding-left: 50px;
+}
+
+.login-box {
+  width: 100%;
+  max-width: 400px;
+}
+
+.lets-go {
+  font-size: 64px;
+  font-weight: 800;
+  margin-bottom: 40px;
+}
+
+.input-group {
+  position: relative;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  background: #000;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.input-group:focus-within {
+  border-color: #1d9bf0;
+}
+
+.input-icon {
+  margin-right: 12px;
+  color: #71767b;
+}
+
+.input-group input {
+  background: transparent;
+  border: none;
+  color: white;
+  width: 100%;
+  outline: none;
+  font-size: 16px;
+}
+
+.toggle-password {
+  cursor: pointer;
+  margin-left: 10px;
+}
+
+.login-btn {
+  width: 100%;
+  padding: 15px;
+  background-color: #1d9bf0;
+  color: white;
+  border: none;
+  border-radius: 30px;
+  font-weight: bold;
+  font-size: 16px;
+  cursor: pointer;
+  margin-top: 10px;
+}
+
+.login-footer {
+  margin-top: 40px;
+}
+
+.signup-link-btn {
+  background: transparent;
+  border: 1px solid #536471;
+  color: #1d9bf0;
+  width: 100%;
+  padding: 10px;
+  border-radius: 30px;
+  margin-top: 10px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+/* Mobile adjustments */
+
+@media (max-width: 900px) {
+  .login-left {
+    display: none;
+  }
+  
+  .login-right {
+    padding: 20px;
+    justify-content: center;
+  }
+
+  .lets-go {
+    font-size: 40px;
+    text-align: center;
+  }
+  
+  .login-box {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 600px) {
+  .lets-go {
+    font-size: 40px;
+  }
+
+  .login-box {
+    max-width: 100%;
+  }
+}
+
+Notifications.jsx :
+import { useEffect, useState } from "react";
+import api from "../api/axios";
+import "./Notifications.css";
+
+const Notifications = () => {
+  const [notifications, setNotifications] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchNotifications = async () => {
+      try {
+        const res = await api.get("/notifications");
+        setNotifications(res.data);
+      } catch (err) {
+        console.error("Error fetching notifications:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchNotifications();
+  }, []);
+
+  const deleteNotifications = async () => {
+    try {
+      await api.delete("/notifications");
+      setNotifications([]);
+    } catch (err) {
+      alert("Failed to delete notifications");
+    }
+  };
+
+  if (loading) return <div className="loading">Loading...</div>;
+
+  return (
+    <div className="notifications-page">
+      <div className="notifications-header">
+        <h2>Notifications</h2>
+        <button className="delete-all-btn" onClick={deleteNotifications}>
+          Clear all
+        </button>
+      </div>
+
+      <div className="notifications-list">
+        {notifications.length === 0 ? (
+          <p className="no-notifs">No notifications yet. ✨</p>
+        ) : (
+          notifications.map((notification) => (
+            <div key={notification._id} className="notification-item">
+              <div className="notif-icon">
+                {notification.type === "follow" && <span className="follow-icon">👤</span>}
+                {notification.type === "like" && <span className="like-icon">❤️</span>}
+              </div>
+              <div className="notif-content">
+                <img 
+                  src={notification.from.profileImg || "https://abs.twimg.com/sticky/default_profile_images/default_profile_400x400.png"} 
+                  alt="user" 
+                />
+                <p>
+                  <b>{notification.from.username}</b> {notification.type === "follow" ? "followed you" : "liked your post"}
+                </p>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default Notifications;
+
+Notifications.css :
+.notifications-page {
+  min-height: 100vh;
+}
+
+.notifications-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px;
+  border-bottom: 1px solid #2f3336;
+  position: sticky;
+  top: 0;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(5px);
+}
+
+.delete-all-btn {
+  background: transparent;
+  color: #1d9bf0;
+  border: 1px solid #1d9bf0;
+  padding: 5px 15px;
+  border-radius: 20px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.delete-all-btn:hover {
+  background: rgba(29, 155, 240, 0.1);
+}
+
+.notification-item {
+  display: flex;
+  padding: 15px;
+  border-bottom: 1px solid #2f3336;
+  gap: 15px;
+  transition: 0.2s;
+}
+
+.notification-item:hover {
+  background-color: #080808;
+}
+
+.notif-icon {
+  font-size: 24px;
+}
+
+.notif-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.notif-content img {
+  width: 35px;
+  height: 35px;
+  border-radius: 50%;
+}
+
+.notif-content p {
+  color: #e7e9ea;
+  font-size: 15px;
+}
+
+.no-notifs {
+  padding: 40px;
+  text-align: center;
+  color: #71767b;
+}
+
+Profile.jsx :
+import { useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
+import api from "../api/axios";
+import PostCard from "../components/PostCard";
+import EditProfileModal from "../components/EditProfileModal";
+import FollowListModal from "../components/FollowListModal";
+import SuggestedUsers from "../components/SuggestedUsers";
+import { useAuth } from "../context/AuthContext";
+import "./Profile.css";
+
+const Profile = () => {
+  const { username } = useParams();
+  const { user: authUser, setUser: setAuthUser } = useAuth();
+
+  const [userProfile, setUserProfile] = useState(null);
+  const [posts, setPosts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [feedType, setFeedType] = useState("posts"); // "posts" or "likes"
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [followLoading, setFollowLoading] = useState(false);
+  const [listModal, setListModal] = useState({ open: false, title: "", data: [] });
+
+  const fetchProfileData = async () => {
+    try {
+      const userRes = await api.get(`/users/profile/${username}`);
+      setUserProfile(userRes.data);
+
+      // Fetch either user's posts or liked posts based on feedType
+      const endpoint = feedType === "posts" 
+        ? `/posts/user/${username}` 
+        : `/posts/likes/${userRes.data._id}`;
+      
+      const postsRes = await api.get(endpoint);
+      setPosts(postsRes.data);
+    } catch (err) {
+      console.error("Error fetching profile data:", err);
+    }
+  };
+
+  useEffect(() => {
+    const initFetch = async () => {
+      setLoading(true);
+      await fetchProfileData();
+      setLoading(false);
+    };
+    initFetch();
+  }, [username, feedType]); // Re-fetch when username or feedType changes
+
+  const handleFollow = async () => {
+    try {
+      setFollowLoading(true);
+      const res = await api.post(`/users/follow/${userProfile._id}`);
+      setAuthUser(res.data);
+      await fetchProfileData();
+    } catch (err) {
+      console.error("Follow error:", err);
+    } finally {
+      setFollowLoading(false);
+    }
+  };
+
+  if (loading) return <div className="loading">Loading...</div>;
+  if (!userProfile) return <div className="error">User not found</div>;
+
+  const isMyProfile = authUser?.username === username;
+  const amIFollowing = authUser?.following?.includes(userProfile?._id);
+
+  return (
+    <div className="profile-container">
+      <div className="profile">
+        <div className="profile-header-nav">
+          <button className="back-btn" onClick={() => window.history.back()}>←</button>
+          <div>
+            <h2>{userProfile.fullName}</h2>
+            <span>{posts.length} {feedType}</span>
+          </div>
+        </div>
+
+        <div className="profile-cover">
+          {userProfile.coverImg && <img src={userProfile.coverImg} alt="cover" />}
+        </div>
+
+        <div className="profile-details-section">
+          <div className="profile-avatar-row">
+            <img
+              className="profile-avatar-large"
+              src={userProfile.profileImg || "https://abs.twimg.com/sticky/default_profile_images/default_profile_400x400.png"}
+              alt="avatar"
+            />
+            {isMyProfile ? (
+              <button className="edit-btn" onClick={() => setIsModalOpen(true)}>Edit profile</button>
+            ) : (
+              <button
+                className={`follow-btn ${amIFollowing ? "unfollow" : ""}`}
+                onClick={handleFollow}
+                disabled={followLoading}
+              >
+                {followLoading ? "..." : amIFollowing ? "Following" : "Follow"}
+              </button>
+            )}
+          </div>
+
+          <div className="profile-info-text">
+            <h2>{userProfile.fullName}</h2>
+            <p className="username-handle">@{userProfile.username}</p>
+            <p className="bio-text">{userProfile.bio || "No bio yet"}</p>
+            <div className="profile-meta">
+              <span>📅 Joined {new Date(userProfile.createdAt).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</span>
+            </div>
+            <div className="follow-counts">
+              <span onClick={() => setListModal({ open: true, title: "Following", data: userProfile.following || [] })} style={{ cursor: "pointer" }}>
+                <b>{userProfile.following?.length || 0}</b> Following
+              </span>
+              <span onClick={() => setListModal({ open: true, title: "Followers", data: userProfile.followers || [] })} style={{ cursor: "pointer" }}>
+                <b>{userProfile.followers?.length || 0}</b> Followers
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Updated Tabs with Functionality */}
+        <div className="profile-tabs">
+          <button 
+            className={feedType === "posts" ? "active" : ""} 
+            onClick={() => setFeedType("posts")}
+          >
+            Posts
+          </button>
+          <button 
+            className={feedType === "likes" ? "active" : ""} 
+            onClick={() => setFeedType("likes")}
+          >
+            Likes
+          </button>
+        </div>
+
+        <div className="profile-feed">
+          {posts.map(post => (
+            <PostCard key={post._id} post={post} onPostDeleted={fetchProfileData} />
+          ))}
+          {posts.length === 0 && (
+            <p className="no-posts">
+              {feedType === "posts" ? "No posts yet." : "No liked posts yet."}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="profile-right-sidebar">
+        <SuggestedUsers />
+      </div>
+
+      {isModalOpen && (
+        <EditProfileModal
+          user={userProfile}
+          onClose={() => setIsModalOpen(false)}
+          onUpdate={fetchProfileData}
+        />
+      )}
+
+      {listModal.open && (
+        <FollowListModal
+          title={listModal.title}
+          users={listModal.data}
+          onClose={() => setListModal({ ...listModal, open: false })}
+          onUpdateProfile={fetchProfileData}
+        />
+      )}
+    </div>
+  );
+};
+
+export default Profile;
+
+Profile.css :
+.profile-header-nav {
+  display: flex;
+  align-items: center;
+  gap: 30px;
+  padding: 5px 15px;
+  position: sticky;
+  top: 0;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(5px);
+  z-index: 10;
+}
+
+.profile-header-nav h2 { 
+  font-size: 19px; 
+  margin: 0;
+}
+
+.profile-header-nav span { 
+  color: #71767b; 
+  font-size: 13px; 
+}
+
+.back-btn {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  width: 35px;
+  height: 35px;
+  transition: 0.2s;
+}
+
+.back-btn:hover {
+  background-color: #181818;
+}
+
+.profile-cover {
+  height: 200px;
+  background-color: #333;
+  width: 100%;
+}
+
+.profile-cover img { 
+  width: 100%; 
+  height: 100%; 
+  object-fit: cover; 
+}
+
+.profile-avatar-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 15px;
+  margin-top: -75px;
+}
+
+.profile-avatar-large {
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  border: 4px solid #000;
+  background-color: #000;
+}
+
+.follow-btn {
+  height: 36px;
+  margin-top: 85px;
+  padding: 0 20px;
+  border-radius: 20px;
+  font-weight: bold;
+  cursor: pointer;
+  border: 1px solid white;
+  background-color: white;
+  color: black;
+  transition: 0.2s;
+}
+
+.follow-btn:hover {
+  background-color: #d7dbdc;
+}
+
+.follow-btn.unfollow {
+  background: transparent;
+  color: white;
+  border: 1px solid #536471;
+}
+
+.follow-btn.unfollow:hover {
+  background-color: rgba(244, 33, 46, 0.1);
+  border-color: #f4212e;
+  color: #f4212e;
+}
+
+.edit-btn {
+  height: 36px;
+  margin-top: 85px;
+  padding: 0 20px;
+  border-radius: 20px;
+  background: transparent;
+  border: 1px solid #536471;
+  color: white;
+  font-weight: bold;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.edit-btn:hover {
+  background-color: #181818;
+}
+
+.profile-info-text { padding: 15px; }
+.username-handle { color: #71767b; margin: 0 0 10px 0; }
+.bio-text { margin-bottom: 10px; color: white; line-height: 1.4; }
+.profile-meta { color: #71767b; font-size: 15px; margin: 10px 0; }
+.follow-counts { display: flex; gap: 20px; font-size: 14px; margin-top: 10px; }
+.follow-counts span:hover { text-decoration: underline; }
+.follow-counts b { color: white; }
+
+/* TABS SECTION */
+.profile-tabs { 
+  display: flex; 
+  border-bottom: 1px solid #2f3336; 
+}
+
+.profile-tabs button {
+  flex: 1; 
+  border: none; 
+  background: none; 
+  color: #71767b;
+  padding: 15px; 
+  font-weight: bold; 
+  cursor: pointer;
+  transition: 0.2s;
+  position: relative;
+  font-size: 15px;
+}
+
+.profile-tabs button:hover {
+  background-color: #080808;
+}
+
+.profile-tabs button.active { 
+  color: white; 
+}
+
+/* The blue line under the active tab */
+.profile-tabs button.active::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 56px;
+  height: 4px;
+  background-color: #1d9bf0;
+  border-radius: 2px;
+}
+
+.profile-container {
+  display: flex;
+  gap: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.profile {
+  flex: 1;
+  border-right: 1px solid #2f3336;
+  min-height: 100vh;
+}
+
+.profile-right-sidebar {
+  width: 350px;
+  padding: 10px;
+}
+
+.no-posts {
+  text-align: center;
+  padding: 40px;
+  color: #71767b;
+  font-size: 15px;
+}
+
+@media (max-width: 1000px) {
+  .profile-right-sidebar {
+    display: none;
+  }
+}
+
+Signup.jsx :
+import { useState } from "react";
+import api from "../api/axios";
+import "./Signup.css"; // This imports Login.css via the @import
+import { useNavigate } from "react-router-dom";
+
+const Signup = () => {
+  const [form, setForm] = useState({
+    fullName: "",
+    username: "",
+    email: "",
+    password: "",
+  });
+
+  const navigate = useNavigate();
+
+  const handleChange = (e) => {
+    setForm({ ...form, [e.target.name]: e.target.value });
+  };
+
+  const handleSignup = async (e) => {
+    e.preventDefault();
+    try {
+      await api.post("/auth/signup", form);
+      alert("Account created! Please login.");
+      navigate("/login");
+    } catch (err) {
+      alert(err.response?.data?.error || "Signup failed");
+    }
+  };
+
+  return (
+    <div className="login-container">
+      <div className="login-left">
+        <span className="big-x-logo">𝕏</span>
+      </div>
+      
+      <div className="login-right">
+        <div className="login-box">
+          <h1 className="lets-go">Join today.</h1>
+          
+          <form onSubmit={handleSignup}>
+            <div className="input-group">
+              <input name="fullName" placeholder="Full Name" onChange={handleChange} required />
+            </div>
+
+            <div className="input-group">
+              <input name="username" placeholder="Username" onChange={handleChange} required />
+            </div>
+
+            <div className="input-group">
+              <input name="email" type="email" placeholder="Email" onChange={handleChange} required />
+            </div>
+
+            <div className="input-group">
+              <input name="password" type="password" placeholder="Password" onChange={handleChange} required />
+            </div>
+
+            <button className="login-btn" type="submit">Sign Up</button>
+          </form>
+
+          <div className="login-footer">
+            <p>Already have an account?</p>
+            <button className="signup-link-btn" onClick={() => navigate("/login")}>
+              Log in
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default Signup;
+
+Signup.css :
+@import "./Login.css";
+
+App.jsx :
+import { Routes, Route, Navigate } from "react-router-dom";
+import { useAuth } from "./context/AuthContext";
+
+// Pages
+import Login from "./pages/Login";
+import Signup from "./pages/Signup";
+import Home from "./pages/Home";
+import Profile from "./pages/Profile";
+import Notifications from "./pages/Notifications";
+
+// Components
+import AppLayout from "./components/AppLayout";
+import ProtectedRoute from "./components/ProtectedRoute";
+
+function App() {
+  const { user } = useAuth();
+
+  return (
+    <Routes>
+      {/* Public Routes: Redirect to home if user is already logged in */}
+      <Route path="/login" element={user ? <Navigate to="/" /> : <Login />} />
+      <Route path="/signup" element={user ? <Navigate to="/" /> : <Signup />} />
+
+      {/* Protected App Routes: All these routes use the Sidebar layout */}
+      <Route
+        path="/"
+        element={
+          <ProtectedRoute>
+            <AppLayout>
+              <Home />
+            </AppLayout>
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/notifications"
+        element={
+          <ProtectedRoute>
+            <AppLayout>
+              <Notifications />
+            </AppLayout>
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/profile/:username"
+        element={
+          <ProtectedRoute>
+            <AppLayout>
+              <Profile />
+            </AppLayout>
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Catch-all: Redirect unknown paths to Home */}
+      <Route path="*" element={<Navigate to="/" />} />
+    </Routes>
+  );
+}
+
+export default App;
+
+index.css :
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen;
+  background-color: #000;
+  color: #e7e9ea;
+}
+
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  outline: none;
+}
+
+main.jsx :
+import React from "react";
+import ReactDOM from "react-dom/client";
+import { BrowserRouter } from "react-router-dom";
+import App from "./App";
+import { AuthProvider } from "./context/AuthContext";
+import "./index.css";
+
+ReactDOM.createRoot(document.getElementById("root")).render(
+  <React.StrictMode>
+    <BrowserRouter>
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    </BrowserRouter>
+  </React.StrictMode>
+);
+

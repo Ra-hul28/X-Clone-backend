@@ -1,0 +1,145 @@
+.sidebar {
+  width: 275px;
+  padding: 10px 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+}
+
+.logo-x {
+  font-size: 32px;
+  padding: 12px;
+  display: inline-block;
+  cursor: pointer;
+}
+
+.menu {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 12px;
+  border-radius: 30px;
+  text-decoration: none;
+  color: #e7e9ea;
+  font-size: 20px;
+  transition: 0.2s;
+}
+
+.menu-item:hover {
+  background-color: #181818;
+}
+
+.menu-item.active {
+  font-weight: bold;
+}
+
+.post-btn-large {
+  background-color: #1d9bf0;
+  color: white;
+  border: none;
+  border-radius: 30px;
+  padding: 15px;
+  font-weight: bold;
+  font-size: 17px;
+  margin-top: 20px;
+  width: 90%;
+  cursor: pointer;
+}
+
+.user-profile-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  border-radius: 999px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.user-profile-toggle:hover {
+  background-color: #181818;
+}
+
+.user-info-mini {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.user-info-mini img {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+}
+
+.full-name {
+  font-weight: bold;
+  font-size: 15px;
+  color: white;
+}
+
+.username {
+  color: #71767b;
+  font-size: 15px;
+}
+
+/* Tablet Responsive */
+@media (max-width: 1280px) {
+  .sidebar { width: 80px; align-items: center; padding: 10px 0; }
+  .label, .user-details, .post-btn-large { display: none; }
+  .menu-item { justify-content: center; width: 50px; height: 50px; }
+}
+
+/* 📱 Mobile Bottom Nav */
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 60px;
+    width: 100%;
+    flex-direction: row;
+    justify-content: space-around;
+    align-items: center;
+    padding: 0;
+    background: black;
+    border-top: 1px solid #2f3336;
+    z-index: 100;
+  }
+
+  .sidebar-top {
+    flex-direction: row;
+    width: 100%;
+    justify-content: space-around;
+  }
+
+  .logo-container,
+  .post-btn-large,
+  .user-profile-toggle {
+    display: none;
+  }
+
+  .menu {
+    flex-direction: row;
+    width: 100%;
+    justify-content: space-around;
+  }
+
+  .menu-item {
+    padding: 0;
+    font-size: 22px;
+  }
+}
+

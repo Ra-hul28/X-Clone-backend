@@ -1,0 +1,26 @@
+.app-layout {
+  display: flex;
+  max-width: 1300px;
+  margin: 0 auto;
+  min-height: 100vh;
+}
+
+.main-content {
+  flex: 1;
+  border-left: 1px solid #2f3336;
+  border-right: 1px solid #2f3336;
+  background-color: #000;
+  box-shadow: 0 0 40px rgba(29, 155, 240, 0.05);
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+  .app-layout {
+    flex-direction: column;
+  }
+
+  .main-content {
+    border: none;
+    padding-bottom: 60px; /* space for bottom nav */
+  }
+}
