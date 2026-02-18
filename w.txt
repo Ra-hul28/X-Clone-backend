@@ -824,10 +824,12 @@ cloudinary.config({
 });
 
 // 2. CONFIGURE CORS (Must be before routes)
-app.use(cors({
-    origin: "http://localhost:5175", // Your frontend URL
-    credentials: true,               // Allows cookies/headers
-}));
+app.use(
+  cors({
+    origin: "https://x-clone-backend-nine.vercel.app",
+    credentials: true,
+  })
+);
 
 const PORT = process.env.PORT || 5000;
 
@@ -861,7 +863,7 @@ axios.js :
 import axios from "axios";
 
 const api = axios.create({
-  baseURL: "http://localhost:5000/api",
+  baseURL: "https://x-clone-backend-kgyt.onrender.com",
   withCredentials: true, // VERY important if using cookies
 });
 

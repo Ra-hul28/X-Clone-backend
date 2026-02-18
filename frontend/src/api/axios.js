@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const api = axios.create({
-  baseURL: "https://x-clone-backend-kgyt.onrender.com",
+  baseURL: "https://x-clone-backend-kgyt.onrender.com/api",
   withCredentials: true, // VERY important if using cookies
 });
 
