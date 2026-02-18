@@ -21,7 +21,7 @@ cloudinary.config({
 // 2. CONFIGURE CORS (Must be before routes)
 app.use(
   cors({
-    origin: process.env.CLIENT_URL,
+    origin: "https://x-clone-backend-nine.vercel.app",
     credentials: true,
   })
 );

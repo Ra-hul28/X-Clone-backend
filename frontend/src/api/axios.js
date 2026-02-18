@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL,
+  baseURL: "https://x-clone-backend-kgyt.onrender.com",
   withCredentials: true, // VERY important if using cookies
 });
 
